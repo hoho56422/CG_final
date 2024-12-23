@@ -161,6 +161,15 @@ struct Particle {
     float lifetime;
 };
 
+struct FlameParticle {
+    glm::vec3 position;
+    glm::vec3 velocity;
+    glm::vec4 color;   // RGBA 顏色
+    float size;        // 粒子大小
+    float lifetime;    // 粒子壽命
+};
+std::vector<FlameParticle> flameParticles;
+
 
 std::vector<Particle> particles;
 const int maxParticles = 20000;
@@ -230,25 +239,25 @@ void initParticleVAO() {
 
     glBindVertexArray(particleVAO);
 
-    // 綁定 VBO 並加載粒子數據（初始為空，稍後更新）
+    // 綁定 VBO 並加載粒子數據（初始為空）
     glBindBuffer(GL_ARRAY_BUFFER, particleVBO);
-    glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(Particle), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, flameParticles.size() * sizeof(FlameParticle), nullptr, GL_DYNAMIC_DRAW);
 
-    // 假設 Particle 結構包含 position、color、size 等屬性：
-    // 1. 粒子位置屬性
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)0);
+    // 位置屬性
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(FlameParticle), (void*)offsetof(FlameParticle, position));
     glEnableVertexAttribArray(0);
 
-    // 2. 粒子顏色屬性
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, color));
+    // 顏色屬性
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(FlameParticle), (void*)offsetof(FlameParticle, color));
     glEnableVertexAttribArray(1);
 
-    // 3. 粒子大小屬性
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, size));
+    // 大小屬性
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(FlameParticle), (void*)offsetof(FlameParticle, size));
     glEnableVertexAttribArray(2);
 
-    glBindVertexArray(0); // 解綁 VAO
+    glBindVertexArray(0); // 解綁
 }
+
 
 
 void renderParticles(Shader &particleShader, unsigned int particleTexture, Shader &SimpleShader, Sphere &comet) {
@@ -278,6 +287,86 @@ void renderParticles(Shader &particleShader, unsigned int particleTexture, Shade
         SimpleShader.setMat4("model", model);
         comet.Draw(); // 渲染小球
     }
+}
+
+
+
+void emitFlameParticles(glm::vec3 sourcePos) {
+    const int numParticles = 50; // Number of particles per frame
+    const float maxLifetime = 1.5f;
+
+    for (int i = 0; i < numParticles; ++i) {
+        Particle p;
+
+        // Random initial position within a small radius
+        const float flameRadius = 12.0f; // 稍微大於彗星半徑，設置火焰的生成範圍
+		p.position = sourcePos + glm::vec3(
+			(rand() % 200 - 100) / 100.0f * flameRadius, // 隨機偏移範圍
+			(rand() % 200 - 100) / 100.0f * flameRadius,
+			(rand() % 200 - 100) / 100.0f * flameRadius
+		);
+
+
+        // Velocity with upward motion
+		p.velocity = glm::vec3(
+		(rand() % 100 - 50) / 100.0f, // 偏移範圍 [-0.5, 0.5]
+		(rand() % 100) / 100.0f,      // 垂直向上 [0.0, 1.0]
+		(rand() % 100 - 50) / 100.0f  // 偏移範圍 [-0.5, 0.5]
+		);
+
+
+        p.color = glm::vec4(1.0f, 0.5f, 0.1f, 1.0f); // Orange fire color
+        p.size = 5.0f + (rand() % 50) / 10.0f; // Varying sizes
+        p.lifetime = 0.8f + (rand() % 50) / 100.0f; // 壽命範圍 [0.8, 1.3] 秒
+
+
+        particles.push_back(p);
+    }
+}
+
+
+
+void updateFlameParticles(std::vector<Particle>& particles, float deltaTime) {
+    for (auto it = particles.begin(); it != particles.end();) {
+        // Update position based on velocity
+        it->position += it->velocity * deltaTime;
+
+        // Make particles move upward over time
+        it->velocity.y += 0.5f * deltaTime; // upward acceleration for flame effect
+
+        // Reduce lifetime
+        it->lifetime -= deltaTime;
+
+        // Gradually increase size for a "blooming" effect
+        it->size += deltaTime * 0.02f;
+
+        // Fade out particle by reducing alpha
+        it->color.a -= deltaTime * 0.5f;
+
+        // Remove particle if its lifetime or transparency reaches zero
+        if (it->lifetime <= 0.0f || it->color.a <= 0.0f) {
+            it = particles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+
+void renderFlameParticles(Shader &flameShader, unsigned int fireTexture) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE); // 使用加法混合模式
+
+    flameShader.Use();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fireTexture);
+    flameShader.setInt("fireTexture", 0);
+
+    glBindVertexArray(particleVAO); // 綁定火焰粒子的 VAO
+    glDrawArrays(GL_POINTS, 0, flameParticles.size());
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
 }
 
 
@@ -391,6 +480,7 @@ int main() {
 	Shader texShader("simpleVS.vs", "texFS.fs");
 	Shader TextShader("TextShader.vs", "TextShader.fs");
 	Shader particleShader("particle.vs", "particle.fs");
+	Shader flameShader("flame.vs", "flame.fs");
 	/* SHADERS */
 
 	// PROJECTION FOR TEXT RENDER
@@ -561,7 +651,7 @@ int main() {
 	unsigned int particleTexture = loadTexture("resources/planets/CometLight.jpg");
 	unsigned int texture_rock = loadTexture("resources/planets/Rock.jpg");
 	unsigned int haloTexture = loadTexture("resources/halo.jpg");
-
+	unsigned int flameTexture = loadTexture("resources/fire.jpg");
 	/* LOAD TEXTURES */
 
 	/* SPHERE GENERATION */
@@ -892,6 +982,9 @@ int main() {
 		emitParticles(glm::vec3(xx, 0.0f, zz));
         updateParticles(deltaTime);
          renderParticles(particleShader, haloTexture, SimpleShader, Comet);
+		emitFlameParticles(glm::vec3(xx, 0.0f, zz));
+		 updateFlameParticles(particles, deltaTime);
+		 renderFlameParticles(flameShader, flameTexture);
 		/*COMET */
 
 		glActiveTexture(GL_TEXTURE0);
