@@ -13,7 +13,6 @@
 #include "Shader.h"
 #include "Sphere.h"
 #include "Camera.h"
-
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -24,6 +23,9 @@
 #include <string>
 #include <cstdlib>
 #include <ctime>
+#include "particleSystem.h"
+#include "particleEmitter.h"
+#include "helper.h"
 #define _USE_MATH_DEFINES
 #include <math.h>
 using namespace std;
@@ -35,6 +37,7 @@ void processInput(GLFWwindow *window);
 void RenderText(Shader &s, std::string text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color);
 unsigned int loadTexture(char const * path, bool isNormalMap);
 unsigned int loadCubemap(std::vector<std::string> faces);
+GLuint LoadTexture2(const char* filename);
 // void ShowInfo(Shader &s);
 void GetDesktopResolution(float& horizontal, float& vertical)
 {
@@ -71,6 +74,10 @@ bool keys[1024];
 GLfloat SceneRotateY = 0.0f;
 GLfloat SceneRotateX = 0.0f;
 bool onPlanet = false;
+GLuint particleTexture;
+
+
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
@@ -153,134 +160,37 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 	}
 }
 
-struct Particle {
-    glm::vec3 position;
-    glm::vec3 velocity;
-    glm::vec4 color;   // RGBA 顏色
-    float size;        // 粒子大小
-    float lifetime;
-};
+mat4 projection;
+particleSystem ps;
 
-
-std::vector<Particle> particles;
-const int maxParticles = 20000;
-
-void emitParticles(glm::vec3 cometPos) {
-    const float radius = 20.0f; // 彗星的半徑範圍
-    for (int i = 0; i < 50; ++i) { // 發射20個粒子
-        Particle p;
-        
-        // 隨機生成粒子的位置
-        float offsetX = ((rand() % 200 - 100) / 100.0f) * radius; // -20 到 20
-        float offsetY = ((rand() % 200 - 100) / 100.0f) * radius; // -20 到 20
-        float offsetZ = ((rand() % 200 - 100) / 100.0f) * radius; // -20 到 20
-
-        // 確保粒子位置在球體內（利用半徑公式 x^2 + y^2 + z^2 <= r^2）
-        glm::vec3 offset(offsetX, offsetY, offsetZ);
-        while (glm::length(offset) > radius) { // 如果偏移量超過半徑，重新生成
-            offsetX = ((rand() % 200 - 100) / 100.0f) * radius;
-            offsetY = ((rand() % 200 - 100) / 100.0f) * radius;
-            offsetZ = ((rand() % 200 - 100) / 100.0f) * radius;
-            offset = glm::vec3(offsetX, offsetY, offsetZ);
-        }
-
-        // 設置粒子屬性
-        p.position = cometPos + offset; // 粒子位置偏移
-        p.velocity = glm::vec3(
-            (rand() % 100 - 50) / 200.0f, // 隨機擴散速度
-            (rand() % 100 - 50) / 200.0f, 
-            -0.1f); // 固定向後的速度
-        p.color = glm::vec4(0.5f, 0.7f, 1.0f, 1.0f); // 藍色帶透明
-        p.size = 0.1f; // 初始大小
-        int randomValue = rand() % 10; // 生成 0-9 的隨機數
-        if (randomValue < 7) {
-            p.lifetime = 2.5f; // 70% 的粒子壽命 2.5 秒
-        } else if (randomValue < 9) {
-            p.lifetime = 2.0f; // 20% 的粒子壽命 2.0 秒
-        } else {
-            p.lifetime = 1.5f; // 10% 的粒子壽命 1.5 秒
-        }
-
-        particles.push_back(p);
-    }
+void initializeParticles() {
+	std::vector<std::string> textures = { "Particle.png" };
+	particleEmitter temp("smoke", 100, 1, vec2(0, 2),
+		//pos
+		vec3(0, -2, 0), vec2(-.1, .1), vec2(0, .3), vec2(-.1, .1),
+		//vel
+		vec3(0, 0.1, 0), vec2(-0.1, 0.2), vec2(-0.1, 1.5), vec2(-0.1, 0.2),
+		//acl
+		vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0),
+		//ori
+		vec3(0, 0, 0), vec2(0, 0), vec2(0, 0), vec2(0, 0),
+		//ori rate
+		vec3(0, 0, 0), vec2(-.1, .1), vec2(-.1, .1), vec2(-.1, .1),
+		//scale
+		vec3(0.6, 0.6, 0.6), vec2(-0.2, 0.2), vec2(-0.2, 0.2), vec2(-0.2, 0.2),
+		//scale rate
+		vec3(0.1, 0.1, 0.1), vec2(-.1, 0.3), vec2(-.1, 0.3), vec2(-.1, 0.3),
+		//start colour
+		vec4(1, 1, 1, 1), vec2(-.1, .1), vec2(-.1, .1), vec2(-.1, .1), vec2(-.1, .1),
+		//end colour
+		vec4(0.3, 0.3, 0.3, 0.2), vec2(-.1, .1), vec2(-.1, .1), vec2(-.1, .1), vec2(-.1, .1)
+		//life span
+		, 5, vec2(-2, 5)
+		//textures
+		, textures);
+	ps.addEmitter(temp);
+	ps.enableEmitter("smoke");
 }
-
-
-
-void updateParticles(float deltaTime) {
-    for (auto it = particles.begin(); it != particles.end();) {
-        it->position += it->velocity * deltaTime;
-        it->lifetime -= deltaTime;
-        it->size += deltaTime * 0.05f; // 粒子逐漸變大
-        it->color.a -= deltaTime * 0.5f; // 粒子逐漸透明
-
-        if (it->lifetime <= 0.0f || it->color.a <= 0.0f) {
-            it = particles.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-unsigned int particleVAO, particleVBO;
-
-void initParticleVAO() {
-    glGenVertexArrays(1, &particleVAO);
-    glGenBuffers(1, &particleVBO);
-
-    glBindVertexArray(particleVAO);
-
-    // 綁定 VBO 並加載粒子數據（初始為空，稍後更新）
-    glBindBuffer(GL_ARRAY_BUFFER, particleVBO);
-    glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(Particle), nullptr, GL_DYNAMIC_DRAW);
-
-    // 假設 Particle 結構包含 position、color、size 等屬性：
-    // 1. 粒子位置屬性
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    // 2. 粒子顏色屬性
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, color));
-    glEnableVertexAttribArray(1);
-
-    // 3. 粒子大小屬性
-    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(Particle), (void*)offsetof(Particle, size));
-    glEnableVertexAttribArray(2);
-
-    glBindVertexArray(0); // 解綁 VAO
-}
-
-
-void renderParticles(Shader &particleShader, unsigned int particleTexture, Shader &SimpleShader, Sphere &comet) {
-    // 1. 渲染粒子光暈
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-
-    particleShader.Use();
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, particleTexture);
-    particleShader.setInt("particleTexture", 0);
-
-    glBindVertexArray(particleVAO);
-    glDrawArrays(GL_POINTS, 0, particles.size());
-    glBindVertexArray(0);
-
-    glDisable(GL_BLEND);
-
-    // 2. 渲染小球
-    SimpleShader.Use();
-    SimpleShader.setVec3("color", glm::vec3(1.0f, 0.5f, 0.2f)); // 設置小球顏色
-    for (const auto &p : particles) {
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, p.position);
-        model = glm::scale(model, glm::vec3(0.01f)); // 小球大小
-
-        SimpleShader.setMat4("model", model);
-        comet.Draw(); // 渲染小球
-    }
-}
-
-
 
 int main() {
 	GetDesktopResolution(SCREEN_WIDTH, SCREEN_HEIGHT); // get resolution for create window
@@ -293,6 +203,13 @@ int main() {
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_SAMPLES, 4);
 	/* GLFW INIT */
+	// Update and render particles
+	// render
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	ps.update(deltaTime);
+	ps.render(camera.GetViewMatrix(), projection);
 
 	/* GLFW WINDOW CREATION */
 	GLFWwindow* window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "LearnOpenGL", glfwGetPrimaryMonitor(), NULL);
@@ -559,11 +476,9 @@ int main() {
 	unsigned int texture_saturn_ring = loadTexture("resources/planets/r.jpg", false);
 	unsigned int texture_earth_clouds = loadTexture("resources/planets/2k_earth_clouds.jpg", false);
 	unsigned int texture_comet = loadTexture("resources/ugly.jpg", false);//add
-	unsigned int particleTexture = loadTexture("resources/planets/CometLight.jpg", false);
 	unsigned int texture_rock = loadTexture("resources/planets/Rock.jpg", false);
 	unsigned int normalMap = loadTexture("resources/planets/Rock.jpg", true);
 	unsigned int haloTexture = loadTexture("resources/halo.jpg", false);
-
 	/* LOAD TEXTURES */
 
 	/* SPHERE GENERATION */
@@ -631,6 +546,11 @@ int main() {
 	onFreeCam = true;
 	glm::mat4 view;
 	glm::vec3 PlanetsPositions[9];
+	particleShader.Use();
+	particleShader.setMat4("view", camera.GetViewMatrix());
+	particleShader.setMat4("projection", projection);
+	ps.render(camera.GetViewMatrix(), projection);
+
 	while (!glfwWindowShouldClose(window))
 	{
 		
@@ -867,6 +787,7 @@ int main() {
 		/* NEPTUNE */
 
 		/*COMET */
+		
 		/* COMET */
 		glm::mat4 model_comet;
 		double a = 300.0f; // 長軸
@@ -901,11 +822,10 @@ int main() {
 
 // 繪製彗星
 	Comet.Draw();
+			// Update and render particles
+		ps.update(deltaTime);
+		ps.render(camera.GetViewMatrix(), projection);
 
-	// 粒子系統的更新和渲染
-	emitParticles(glm::vec3(xx, 0.0f, zz));
-	updateParticles(deltaTime);
-	renderParticles(particleShader, haloTexture, SimpleShader, Comet);
 
 		/*COMET */
 
@@ -1197,36 +1117,10 @@ void processInput(GLFWwindow *window)
 		Info.Gravity = "2.55";
 		onFreeCam = false;
 	}
-	if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS)
-	{
-		PlanetView = 6;
-		Info.Name = "SATURN";
-		Info.OrbitSpeed = "9,67";
-		Info.Mass = "561.80376";
-		Info.Gravity = "1.12";
-		onFreeCam = false;
-		camera.FreeCam = false;
-	}
-	if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS)
-	{
-		PlanetView = 7;
-		Info.Name = "URANUS";
-		Info.OrbitSpeed = "6,84";
-		Info.Mass = "86.05440";
-		Info.Gravity = "0.97";
-		onFreeCam = false;
-		camera.FreeCam = false;
-	}
-	if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS)
-	{
-		PlanetView = 8;
-		Info.Name = "NEPTUNE";
-		Info.OrbitSpeed = "5,48";
-		Info.Mass = "101.59200";
-		Info.Gravity = "1.17";
-		onFreeCam = false;
-		camera.FreeCam = false;
-	}
+	if(glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS)
+		ps.toggleEmitter("smoke");
+	if(glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS)
+		ps.oneTimeEmit("smoke", 10);
 
 } 
 
@@ -1312,6 +1206,32 @@ unsigned int loadTexture(char const * path, bool isNormalMap)
 
 	return textureID;
 }
+
+
+GLuint LoadTexture2(const char* filename) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    int width, height, nrChannels;
+    unsigned char* data = stbi_load(filename, &width, &height, &nrChannels, 0);
+    if (data) {
+        GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    } else {
+        std::cerr << "Failed to load texture: " << filename << std::endl;
+    }
+    stbi_image_free(data);
+    return textureID;
+}
+
 void RenderText(Shader &s, std::string text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color)
 {
 	// Activate corresponding render state	
